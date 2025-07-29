@@ -1,0 +1,16 @@
+body {
+  font-family: sans-serif;
+  margin: 1em;
+}
+
+.drop {
+  border: 2px dashed #888;
+  padding: 1em;
+  margin: 1em 0;
+  text-align: center;
+}
+
+#preview img {
+  max-width: 100%;
+  margin: 0.5em 0;
+}

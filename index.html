@@ -1,0 +1,25 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>pdf2imageweb</title>
+  <link rel="manifest" href="manifest.json">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <h1>pdf2imageweb</h1>
+  <!-- ファイル選択エリア -->
+  <input type="file" id="file" accept="application/pdf" multiple>
+  <div id="drop" class="drop">ここにPDFをドロップ</div>
+  <button id="run">実行</button>
+  <!-- 追加したPDFの一覧 -->
+  <ul id="list"></ul>
+  <!-- プレビュー表示エリア -->
+  <div id="preview"></div>
+  <button id="download" disabled>すべてダウンロード</button>
+  <script src="https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

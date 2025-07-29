@@ -1,0 +1,9 @@
+{
+  "name": "pdf2imageweb",
+  "short_name": "pdf2imageweb",
+  "start_url": "/index.html",
+  "display": "standalone",
+  "background_color": "#ffffff",
+  "description": "PDFを画像に変換するツール",
+  "icons": []
+}
