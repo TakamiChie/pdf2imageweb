@@ -117,6 +117,43 @@ async function downloadZip() {
 /* Service Worker登録 */
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', () => {
-    navigator.serviceWorker.register('sw.js')
-  })
+    navigator.serviceWorker.register('/service-worker.js').then(registration => {
+      registration.onupdatefound = () => {
+        const installingWorker = registration.installing;
+        installingWorker.onstatechange = () => {
+          if (installingWorker.state === 'installed') {
+            if (navigator.serviceWorker.controller) {
+              // 更新がある場合
+              showUpdateMessage();
+            }
+          }
+        };
+      };
+    });
+  });
+}
+
+function showUpdateMessage() {
+  const updateDiv = document.createElement('div');
+  updateDiv.textContent = '更新データがあります。再読み込みしてください。';
+  updateDiv.style.position = 'fixed';
+  updateDiv.style.bottom = '20px';
+  updateDiv.style.left = '50%';
+  updateDiv.style.transform = 'translateX(-50%)';
+  updateDiv.style.background = '#ff0';
+  updateDiv.style.padding = '10px 20px';
+  updateDiv.style.zIndex = '1000';
+  updateDiv.style.borderRadius = '8px';
+
+  const reloadBtn = document.createElement('button');
+  reloadBtn.textContent = '更新';
+  reloadBtn.onclick = () => {
+    if (navigator.serviceWorker.controller) {
+      navigator.serviceWorker.controller.postMessage('SKIP_WAITING');
+    }
+    window.location.reload();
+  };
+  updateDiv.appendChild(reloadBtn);
+
+  document.body.appendChild(updateDiv);
 }

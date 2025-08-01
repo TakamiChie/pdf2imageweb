@@ -8,12 +8,12 @@ body {
   padding: 1em;
   margin: 1em 0;
   text-align: center;
+  cursor: pointer;
 }
+
 
 #preview img {
   max-width: 240px;
   border: 1px solid black;
-  margin-right: 4px;
-  max-width: 100%;
-  margin: 0.5em 0;
+  margin: 0.5em 4px;
 }
