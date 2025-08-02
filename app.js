@@ -8,13 +8,12 @@ const imagesCache = []
 /* 要素の取得 */
 const input = document.getElementById('file')
 const drop = document.getElementById('drop')
-const runBtn = document.getElementById('run')
 const list = document.getElementById('list')
 const preview = document.getElementById('preview')
 const downloadBtn = document.getElementById('download')
 
 /* ファイルをリストに追加する */
-function addFiles(fileList) {
+async function addFiles(fileList) {
   for (const f of fileList) {
     if (f.type === 'application/pdf') {
       files.push(f)
@@ -24,6 +23,16 @@ function addFiles(fileList) {
       list.appendChild(li)
     }
   }
+
+  preview.innerHTML = ''
+  if (files.length === 0) return
+  imagesCache.length = 0
+  for (const file of files) {
+    const images = await convertPdf(file)
+    imagesCache.push(images)
+  }
+  showImages(0)
+  downloadBtn.disabled = false
 }
 
 /* ドロップ操作 */
@@ -58,19 +67,6 @@ async function convertPdf(file) {
   }
   return images
 }
-
-/* 実行ボタン */
-runBtn.addEventListener('click', async () => {
-  preview.innerHTML = ''
-  if (files.length === 0) return
-  imagesCache.length = 0
-  for (const file of files) {
-    const images = await convertPdf(file)
-    imagesCache.push(images)
-  }
-  showImages(0)
-  downloadBtn.disabled = false
-})
 
 /* リスト項目をクリックしたとき */
 list.addEventListener('click', e => {
