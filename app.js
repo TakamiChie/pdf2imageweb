@@ -130,6 +130,14 @@ if ('serviceWorker' in navigator) {
         };
       };
     });
+
+    // 新しいService Workerがアクティブになったらページをリロードする
+    let refreshing;
+    navigator.serviceWorker.addEventListener('controllerchange', () => {
+      if (refreshing) return;
+      window.location.reload();
+      refreshing = true;
+    });
   });
 }
 
@@ -148,10 +156,12 @@ function showUpdateMessage() {
   const reloadBtn = document.createElement('button');
   reloadBtn.textContent = '更新';
   reloadBtn.onclick = () => {
-    if (navigator.serviceWorker.controller) {
-      navigator.serviceWorker.controller.postMessage('SKIP_WAITING');
-    }
-    window.location.reload();
+    // waiting状態のService Workerに更新を促す
+    navigator.serviceWorker.getRegistration().then(registration => {
+      if (registration && registration.waiting) {
+        registration.waiting.postMessage('SKIP_WAITING');
+      }
+    });
   };
   updateDiv.appendChild(reloadBtn);
 
