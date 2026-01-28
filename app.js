@@ -4,6 +4,8 @@
 const files = []
 /* 変換後の画像データURLを保持 */
 const imagesCache = []
+/* PDFページの並び順を保持 */
+const pageOrders = []
 
 /* 要素の取得 */
 const input = document.getElementById('file')
@@ -27,9 +29,11 @@ async function addFiles(fileList) {
   preview.innerHTML = ''
   if (files.length === 0) return
   imagesCache.length = 0
+  pageOrders.length = 0
   for (const file of files) {
     const images = await convertPdf(file)
     imagesCache.push(images)
+    pageOrders.push(Array.from({ length: images.length }, (_, index) => index))
   }
   showImages(0)
   downloadBtn.disabled = false
@@ -79,12 +83,70 @@ list.addEventListener('click', e => {
 /* 画像をプレビューに表示 */
 function showImages(index) {
   preview.innerHTML = ''
-  for (const url of imagesCache[index] || []) {
+  const images = imagesCache[index] || []
+  const listItems = Array.from(list.children)
+  listItems.forEach((item, itemIndex) => {
+    item.classList.toggle('active', itemIndex === index)
+  })
+  images.forEach((url, pageIndex) => {
+    const container = document.createElement('div')
+    container.className = 'page-item'
     const img = document.createElement('img')
     img.src = url
-    preview.appendChild(img)
-  }
+    container.appendChild(img)
+    const label = document.createElement('div')
+    label.className = 'page-label'
+    label.textContent = `ページ ${pageIndex + 1}`
+    container.appendChild(label)
+    const actions = document.createElement('div')
+    actions.className = 'page-actions'
+    const upButton = document.createElement('button')
+    upButton.type = 'button'
+    upButton.textContent = '上へ'
+    upButton.disabled = pageIndex === 0
+    upButton.addEventListener('click', () => {
+      movePage(index, pageIndex, -1)
+    })
+    const downButton = document.createElement('button')
+    downButton.type = 'button'
+    downButton.textContent = '下へ'
+    downButton.disabled = pageIndex === images.length - 1
+    downButton.addEventListener('click', () => {
+      movePage(index, pageIndex, 1)
+    })
+    actions.appendChild(upButton)
+    actions.appendChild(downButton)
+    container.appendChild(actions)
+    preview.appendChild(container)
+  })
   downloadBtn.onclick = () => downloadZip()
+}
+
+/* ページの並びを入れ替える */
+function movePage(pdfIndex, pageIndex, offset) {
+  const images = imagesCache[pdfIndex]
+  const targetIndex = pageIndex + offset
+  if (!images || targetIndex < 0 || targetIndex >= images.length) {
+    return
+  }
+  const order = pageOrders[pdfIndex]
+  const orderTemp = order[pageIndex]
+  order[pageIndex] = order[targetIndex]
+  order[targetIndex] = orderTemp
+  const temp = images[pageIndex]
+  images[pageIndex] = images[targetIndex]
+  images[targetIndex] = temp
+  showImages(pdfIndex)
+}
+
+/* PDFページの並び替え結果を生成 */
+async function createReorderedPdf(pdfFile, order) {
+  const arrayBuffer = await pdfFile.arrayBuffer()
+  const sourcePdf = await PDFLib.PDFDocument.load(arrayBuffer)
+  const outputPdf = await PDFLib.PDFDocument.create()
+  const pages = await outputPdf.copyPages(sourcePdf, order)
+  pages.forEach(page => outputPdf.addPage(page))
+  return outputPdf.save()
 }
 
 /* 画像とPDFをZIPでダウンロード */
@@ -93,7 +155,8 @@ async function downloadZip() {
   for (let i = 0; i < files.length; i++) {
     const pdfFile = files[i]
     const folder = zip.folder(pdfFile.name.replace(/\.pdf$/i, ''))
-    folder.file(pdfFile.name, pdfFile)
+    const reorderedPdfBytes = await createReorderedPdf(pdfFile, pageOrders[i])
+    folder.file(pdfFile.name, reorderedPdfBytes)
     const imgFolder = folder.folder('images')
     let page = 1
     for (const url of imagesCache[i]) {
