@@ -4,6 +4,8 @@
 const files = []
 /* 変換後の画像データURLを保持 */
 const imagesCache = []
+/* PDFページの並び順を保持 */
+const pageOrders = []
 
 /* 要素の取得 */
 const input = document.getElementById('file')
@@ -27,9 +29,11 @@ async function addFiles(fileList) {
   preview.innerHTML = ''
   if (files.length === 0) return
   imagesCache.length = 0
+  pageOrders.length = 0
   for (const file of files) {
     const images = await convertPdf(file)
     imagesCache.push(images)
+    pageOrders.push(Array.from({ length: images.length }, (_, index) => index))
   }
   showImages(0)
   downloadBtn.disabled = false
@@ -125,10 +129,24 @@ function movePage(pdfIndex, pageIndex, offset) {
   if (!images || targetIndex < 0 || targetIndex >= images.length) {
     return
   }
+  const order = pageOrders[pdfIndex]
+  const orderTemp = order[pageIndex]
+  order[pageIndex] = order[targetIndex]
+  order[targetIndex] = orderTemp
   const temp = images[pageIndex]
   images[pageIndex] = images[targetIndex]
   images[targetIndex] = temp
   showImages(pdfIndex)
+}
+
+/* PDFページの並び替え結果を生成 */
+async function createReorderedPdf(pdfFile, order) {
+  const arrayBuffer = await pdfFile.arrayBuffer()
+  const sourcePdf = await PDFLib.PDFDocument.load(arrayBuffer)
+  const outputPdf = await PDFLib.PDFDocument.create()
+  const pages = await outputPdf.copyPages(sourcePdf, order)
+  pages.forEach(page => outputPdf.addPage(page))
+  return outputPdf.save()
 }
 
 /* 画像とPDFをZIPでダウンロード */
@@ -137,7 +155,8 @@ async function downloadZip() {
   for (let i = 0; i < files.length; i++) {
     const pdfFile = files[i]
     const folder = zip.folder(pdfFile.name.replace(/\.pdf$/i, ''))
-    folder.file(pdfFile.name, pdfFile)
+    const reorderedPdfBytes = await createReorderedPdf(pdfFile, pageOrders[i])
+    folder.file(pdfFile.name, reorderedPdfBytes)
     const imgFolder = folder.folder('images')
     let page = 1
     for (const url of imagesCache[i]) {
