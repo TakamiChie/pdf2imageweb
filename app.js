@@ -79,12 +79,56 @@ list.addEventListener('click', e => {
 /* 画像をプレビューに表示 */
 function showImages(index) {
   preview.innerHTML = ''
-  for (const url of imagesCache[index] || []) {
+  const images = imagesCache[index] || []
+  const listItems = Array.from(list.children)
+  listItems.forEach((item, itemIndex) => {
+    item.classList.toggle('active', itemIndex === index)
+  })
+  images.forEach((url, pageIndex) => {
+    const container = document.createElement('div')
+    container.className = 'page-item'
     const img = document.createElement('img')
     img.src = url
-    preview.appendChild(img)
-  }
+    container.appendChild(img)
+    const label = document.createElement('div')
+    label.className = 'page-label'
+    label.textContent = `ページ ${pageIndex + 1}`
+    container.appendChild(label)
+    const actions = document.createElement('div')
+    actions.className = 'page-actions'
+    const upButton = document.createElement('button')
+    upButton.type = 'button'
+    upButton.textContent = '上へ'
+    upButton.disabled = pageIndex === 0
+    upButton.addEventListener('click', () => {
+      movePage(index, pageIndex, -1)
+    })
+    const downButton = document.createElement('button')
+    downButton.type = 'button'
+    downButton.textContent = '下へ'
+    downButton.disabled = pageIndex === images.length - 1
+    downButton.addEventListener('click', () => {
+      movePage(index, pageIndex, 1)
+    })
+    actions.appendChild(upButton)
+    actions.appendChild(downButton)
+    container.appendChild(actions)
+    preview.appendChild(container)
+  })
   downloadBtn.onclick = () => downloadZip()
+}
+
+/* ページの並びを入れ替える */
+function movePage(pdfIndex, pageIndex, offset) {
+  const images = imagesCache[pdfIndex]
+  const targetIndex = pageIndex + offset
+  if (!images || targetIndex < 0 || targetIndex >= images.length) {
+    return
+  }
+  const temp = images[pageIndex]
+  images[pageIndex] = images[targetIndex]
+  images[targetIndex] = temp
+  showImages(pdfIndex)
 }
 
 /* 画像とPDFをZIPでダウンロード */
