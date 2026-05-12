@@ -113,21 +113,22 @@ async function showImages(index) {
     const mergeType = document.createElement('select')
     mergeType.className = 'merge-select'
     mergeType.innerHTML = `
+      <option value="" selected>--マージ方法選択--</option>
       <option value="vertical">2ページ上下マージ</option>
       <option value="horizontal">2ページ左右マージ</option>
       <option value="tripleVertical">3ページ上下マージ</option>
       <option value="tripleHorizontal">3ページ左右マージ</option>
       <option value="grid">4ページマージ</option>
     `
-    const mergeExecute = document.createElement('button')
-    mergeExecute.type = 'button'
-    mergeExecute.textContent = 'マージ実行'
-    mergeExecute.disabled = isModeDisabled(modes, pageIndex, images.length, mergeType.value)
-    mergeType.addEventListener('change', () => {
-      mergeExecute.disabled = isModeDisabled(modes, pageIndex, images.length, mergeType.value)
-    })
-    mergeExecute.addEventListener('click', async () => {
-      await applyMergeMode(modes, mergedImages, images, pageIndex, mergeType.value)
+    mergeType.addEventListener('change', async () => {
+      const selectedMode = mergeType.value
+      if (!selectedMode) {
+        return
+      }
+      if (isModeDisabled(modes, pageIndex, images.length, selectedMode)) {
+        return
+      }
+      await applyMergeMode(modes, mergedImages, images, pageIndex, selectedMode)
       showImages(index)
     })
     const clearMerge = document.createElement('button')
@@ -140,7 +141,6 @@ async function showImages(index) {
       showImages(index)
     })
     mergeControl.appendChild(mergeType)
-    mergeControl.appendChild(mergeExecute)
     mergeControl.appendChild(clearMerge)
     container.appendChild(mergeControl)
     const actions = document.createElement('div')
