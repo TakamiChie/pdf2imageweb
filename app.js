@@ -110,28 +110,25 @@ async function showImages(index) {
     container.appendChild(label)
     const mergeControl = document.createElement('div')
     mergeControl.className = 'page-actions'
-    const mergeVertical = document.createElement('button')
-    mergeVertical.type = 'button'
-    mergeVertical.textContent = '上下でマージ'
-    mergeVertical.disabled = isMergeDisabled(modes, pageIndex, images.length)
-    mergeVertical.addEventListener('click', async () => {
-      await applyMergeMode(modes, mergedImages, images, pageIndex, 'vertical')
-      showImages(index)
-    })
-    const mergeHorizontal = document.createElement('button')
-    mergeHorizontal.type = 'button'
-    mergeHorizontal.textContent = '左右でマージ'
-    mergeHorizontal.disabled = isMergeDisabled(modes, pageIndex, images.length)
-    mergeHorizontal.addEventListener('click', async () => {
-      await applyMergeMode(modes, mergedImages, images, pageIndex, 'horizontal')
-      showImages(index)
-    })
-    const mergeGrid = document.createElement('button')
-    mergeGrid.type = 'button'
-    mergeGrid.textContent = '4ページマージ'
-    mergeGrid.disabled = isFourMergeDisabled(modes, pageIndex, images.length)
-    mergeGrid.addEventListener('click', async () => {
-      await applyMergeMode(modes, mergedImages, images, pageIndex, 'grid')
+    const mergeType = document.createElement('select')
+    mergeType.className = 'merge-select'
+    mergeType.innerHTML = `
+      <option value="" selected>--マージ方法選択--</option>
+      <option value="vertical">2ページ上下マージ</option>
+      <option value="horizontal">2ページ左右マージ</option>
+      <option value="tripleVertical">3ページ上下マージ</option>
+      <option value="tripleHorizontal">3ページ左右マージ</option>
+      <option value="grid">4ページマージ</option>
+    `
+    mergeType.addEventListener('change', async () => {
+      const selectedMode = mergeType.value
+      if (!selectedMode) {
+        return
+      }
+      if (isModeDisabled(modes, pageIndex, images.length, selectedMode)) {
+        return
+      }
+      await applyMergeMode(modes, mergedImages, images, pageIndex, selectedMode)
       showImages(index)
     })
     const clearMerge = document.createElement('button')
@@ -143,9 +140,7 @@ async function showImages(index) {
       mergedImages[pageIndex] = null
       showImages(index)
     })
-    mergeControl.appendChild(mergeVertical)
-    mergeControl.appendChild(mergeHorizontal)
-    mergeControl.appendChild(mergeGrid)
+    mergeControl.appendChild(mergeType)
     mergeControl.appendChild(clearMerge)
     container.appendChild(mergeControl)
     const actions = document.createElement('div')
@@ -227,32 +222,32 @@ async function createMergedPdf(pdfFile, order, modes, images, mergedImages) {
       }
       const mergedUrl = mergedImages && mergedImages[i]
         ? mergedImages[i]
-        : await mergeImages(
-          images[i],
-          images[i + 1],
-          mode,
-          images[i + 2],
-          images[i + 3]
-        )
+        : await mergeImages(images[i], images[i + 1], mode, images[i + 2], images[i + 3])
       await appendImagePage(outputPdf, mergedUrl)
       i += 3
+      continue
+    }
+    if (mode === 'tripleVertical' || mode === 'tripleHorizontal') {
+      const nextIndex = i + 2
+      if (nextIndex >= order.length) {
+        await appendOriginalPage(outputPdf, sourcePdf, pageIndex)
+        continue
+      }
+      const mergedUrl = mergedImages && mergedImages[i]
+        ? mergedImages[i]
+        : await mergeImages(images[i], images[i + 1], mode, images[i + 2])
+      await appendImagePage(outputPdf, mergedUrl)
+      i += 2
       continue
     }
     if (i + 1 >= order.length) {
       await appendOriginalPage(outputPdf, sourcePdf, pageIndex)
       continue
     }
-    if (mode === 'vertical') {
-      const mergedUrl = mergedImages && mergedImages[i]
-        ? mergedImages[i]
-        : await mergeImages(images[i], images[i + 1], mode)
-      await appendImagePage(outputPdf, mergedUrl)
-    } else if (mode === 'horizontal') {
-      const mergedUrl = mergedImages && mergedImages[i]
-        ? mergedImages[i]
-        : await mergeImages(images[i], images[i + 1], mode)
-      await appendImagePage(outputPdf, mergedUrl)
-    }
+    const mergedUrl = mergedImages && mergedImages[i]
+      ? mergedImages[i]
+      : await mergeImages(images[i], images[i + 1], mode)
+    await appendImagePage(outputPdf, mergedUrl)
     i += 1
   }
   return outputPdf.save()
@@ -329,12 +324,33 @@ async function buildExportItems(images, modes, mergedImages) {
     const firstUrl = images[i]
     const secondUrl = images[i + 1]
     const mode = modes[i] || 'none'
-    if (mode === 'none' || (mode !== 'grid' && !secondUrl)) {
+    if (mode === 'none' || (mode !== 'grid' && mode !== 'tripleVertical' && mode !== 'tripleHorizontal' && !secondUrl)) {
       items.push({
         url: firstUrl,
         label: `ページ ${displayIndex}`
       })
       displayIndex += 1
+      continue
+    }
+    if (mode === 'tripleVertical' || mode === 'tripleHorizontal') {
+      const thirdUrl = images[i + 2]
+      if (!thirdUrl) {
+        items.push({
+          url: firstUrl,
+          label: `ページ ${displayIndex}`
+        })
+        displayIndex += 1
+        continue
+      }
+      const mergedUrl = mergedImages && mergedImages[i]
+        ? mergedImages[i]
+        : await mergeImages(firstUrl, secondUrl, mode, thirdUrl)
+      items.push({
+        url: mergedUrl,
+        label: `ページ ${displayIndex}-${displayIndex + 2}`
+      })
+      displayIndex += 3
+      i += 2
       continue
     }
     if (mode === 'grid') {
@@ -397,6 +413,28 @@ async function mergeImages(firstUrl, secondUrl, mode, thirdUrl, fourthUrl) {
     const secondY = (canvas.height - secondImage.height) / 2
     context.drawImage(firstImage, 0, firstY)
     context.drawImage(secondImage, firstImage.width, secondY)
+  } else if (mode === 'tripleVertical' && thirdImage) {
+    canvas.width = Math.max(firstImage.width, secondImage.width, thirdImage.width)
+    canvas.height = firstImage.height + secondImage.height + thirdImage.height
+    context.fillStyle = '#fff'
+    context.fillRect(0, 0, canvas.width, canvas.height)
+    const firstX = (canvas.width - firstImage.width) / 2
+    const secondX = (canvas.width - secondImage.width) / 2
+    const thirdX = (canvas.width - thirdImage.width) / 2
+    context.drawImage(firstImage, firstX, 0)
+    context.drawImage(secondImage, secondX, firstImage.height)
+    context.drawImage(thirdImage, thirdX, firstImage.height + secondImage.height)
+  } else if (mode === 'tripleHorizontal' && thirdImage) {
+    canvas.width = firstImage.width + secondImage.width + thirdImage.width
+    canvas.height = Math.max(firstImage.height, secondImage.height, thirdImage.height)
+    context.fillStyle = '#fff'
+    context.fillRect(0, 0, canvas.width, canvas.height)
+    const firstY = (canvas.height - firstImage.height) / 2
+    const secondY = (canvas.height - secondImage.height) / 2
+    const thirdY = (canvas.height - thirdImage.height) / 2
+    context.drawImage(firstImage, 0, firstY)
+    context.drawImage(secondImage, firstImage.width, secondY)
+    context.drawImage(thirdImage, firstImage.width + secondImage.width, thirdY)
   } else if (mode === 'grid' && thirdImage && fourthImage) {
     const leftWidth = Math.max(firstImage.width, thirdImage.width)
     const rightWidth = Math.max(secondImage.width, fourthImage.width)
@@ -446,6 +484,12 @@ function buildPageLabel(modes, pageIndex) {
   if (currentMode === 'horizontal') {
     return `ページ ${pageNumber}（次ページと左右マージ）`
   }
+  if (currentMode === 'tripleVertical') {
+    return `ページ ${pageNumber}（次2ページと上下マージ）`
+  }
+  if (currentMode === 'tripleHorizontal') {
+    return `ページ ${pageNumber}（次2ページと左右マージ）`
+  }
   if (currentMode === 'grid') {
     return `ページ ${pageNumber}（4ページマージ）`
   }
@@ -453,8 +497,9 @@ function buildPageLabel(modes, pageIndex) {
 }
 
 /* マージ可否を判定 */
-function isMergeDisabled(modes, pageIndex, pageCount) {
-  if (pageIndex >= pageCount - 1) {
+function isModeDisabled(modes, pageIndex, pageCount, mode) {
+  const requiredPages = getRequiredPages(mode)
+  if (pageIndex > pageCount - requiredPages) {
     return true
   }
   const previousMode = modes[pageIndex - 1]
@@ -464,25 +509,25 @@ function isMergeDisabled(modes, pageIndex, pageCount) {
   return false
 }
 
-/* 4ページマージ可否を判定 */
-function isFourMergeDisabled(modes, pageIndex, pageCount) {
-  if (pageIndex >= pageCount - 3) {
-    return true
+/* マージモードごとの必要ページ数を返す */
+function getRequiredPages(mode) {
+  if (mode === 'grid') {
+    return 4
   }
-  const previousMode = modes[pageIndex - 1]
-  if (previousMode && previousMode !== 'none') {
-    return true
+  if (mode === 'tripleVertical' || mode === 'tripleHorizontal') {
+    return 3
   }
-  return false
+  return 2
 }
 
 /* マージモードを適用 */
 async function applyMergeMode(modes, mergedImages, images, pageIndex, mode) {
+  const requiredPages = getRequiredPages(mode)
+  const endIndex = pageIndex + requiredPages - 1
+  if (!images[endIndex]) {
+    return
+  }
   if (mode === 'grid') {
-    const nextIndex = pageIndex + 3
-    if (!images[nextIndex]) {
-      return
-    }
     modes[pageIndex] = mode
     mergedImages[pageIndex] = await mergeImages(
       images[pageIndex],
@@ -491,7 +536,23 @@ async function applyMergeMode(modes, mergedImages, images, pageIndex, mode) {
       images[pageIndex + 2],
       images[pageIndex + 3]
     )
-    for (let i = pageIndex + 1; i <= pageIndex + 3; i += 1) {
+    for (let i = pageIndex + 1; i <= endIndex; i += 1) {
+      if (i < modes.length) {
+        modes[i] = 'none'
+        mergedImages[i] = null
+      }
+    }
+    return
+  }
+  if (mode === 'tripleVertical' || mode === 'tripleHorizontal') {
+    modes[pageIndex] = mode
+    mergedImages[pageIndex] = await mergeImages(
+      images[pageIndex],
+      images[pageIndex + 1],
+      mode,
+      images[pageIndex + 2]
+    )
+    for (let i = pageIndex + 1; i <= endIndex; i += 1) {
       if (i < modes.length) {
         modes[i] = 'none'
         mergedImages[i] = null
