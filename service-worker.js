@@ -1,4 +1,4 @@
-const CACHE_NAME = 'pdf2imageweb-cache-v2'
+const CACHE_NAME = 'pdf2imageweb-cache-v3'
 const FILES = [
   '/',
   '/index.html',

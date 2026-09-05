@@ -66,7 +66,8 @@ body {
   cursor: pointer;
 }
 
-.merge-select {
+.merge-select,
+.rotation-select {
   font-size: 0.8em;
   padding: 0.2em;
 }

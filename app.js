@@ -4,6 +4,10 @@
 const files = []
 /* 変換後の画像データURLを保持 */
 const imagesCache = []
+/* 回転前の画像と各ページの回転角度を保持 */
+const originalImagesCache = []
+const pageRotations = []
+let editingPages = false
 /* PDFページの並び順を保持 */
 const pageOrders = []
 /* ページマージ設定を保持 */
@@ -20,6 +24,7 @@ const downloadBtn = document.getElementById('download')
 
 /* ファイルをリストに追加する */
 async function addFiles(fileList) {
+  if (editingPages) return
   for (const f of fileList) {
     if (f.type === 'application/pdf') {
       files.push(f)
@@ -33,12 +38,16 @@ async function addFiles(fileList) {
   preview.innerHTML = ''
   if (files.length === 0) return
   imagesCache.length = 0
+  originalImagesCache.length = 0
+  pageRotations.length = 0
   pageOrders.length = 0
   mergeModes.length = 0
   mergedImagesCache.length = 0
   for (const file of files) {
     const images = await convertPdf(file)
     imagesCache.push(images)
+    originalImagesCache.push([...images])
+    pageRotations.push(images.map(() => 0))
     pageOrders.push(Array.from({ length: images.length }, (_, index) => index))
     mergeModes.push(Array.from({ length: images.length }, () => 'none'))
     mergedImagesCache.push(Array.from({ length: images.length }, () => null))
@@ -82,6 +91,7 @@ async function convertPdf(file) {
 
 /* リスト項目をクリックしたとき */
 list.addEventListener('click', e => {
+  if (editingPages) return
   if (e.target.tagName === 'LI') {
     const index = Number(e.target.dataset.index)
     showImages(index)
@@ -108,6 +118,24 @@ async function showImages(index) {
     label.className = 'page-label'
     label.textContent = buildPageLabel(modes, pageIndex)
     container.appendChild(label)
+    const rotationControl = document.createElement('label')
+    rotationControl.className = 'page-actions'
+    rotationControl.textContent = '回転（時計回り）'
+    const rotationSelect = document.createElement('select')
+    rotationSelect.className = 'rotation-select'
+    rotationSelect.setAttribute('aria-label', `ページ ${pageIndex + 1}の回転角度（時計回り）`)
+    for (const angle of [0, 90, 180, 270]) {
+      const option = document.createElement('option')
+      option.value = angle
+      option.textContent = `${angle}°`
+      rotationSelect.appendChild(option)
+    }
+    rotationSelect.value = pageRotations[index][pageIndex]
+    rotationSelect.addEventListener('change', () => {
+      editPages(index, () => rotatePage(index, pageIndex, Number(rotationSelect.value)))
+    })
+    rotationControl.appendChild(rotationSelect)
+    container.appendChild(rotationControl)
     const mergeControl = document.createElement('div')
     mergeControl.className = 'page-actions'
     const mergeType = document.createElement('select')
@@ -128,8 +156,7 @@ async function showImages(index) {
       if (isModeDisabled(modes, pageIndex, images.length, selectedMode)) {
         return
       }
-      await applyMergeMode(modes, mergedImages, images, pageIndex, selectedMode)
-      showImages(index)
+      await editPages(index, () => applyMergeMode(modes, mergedImages, images, pageIndex, selectedMode))
     })
     const clearMerge = document.createElement('button')
     clearMerge.type = 'button'
@@ -168,7 +195,8 @@ async function showImages(index) {
 }
 
 /* ページの並びを入れ替える */
-function movePage(pdfIndex, pageIndex, offset) {
+async function movePage(pdfIndex, pageIndex, offset) {
+  if (editingPages) return
   const images = imagesCache[pdfIndex]
   const targetIndex = pageIndex + offset
   if (!images || targetIndex < 0 || targetIndex >= images.length) {
@@ -189,7 +217,74 @@ function movePage(pdfIndex, pageIndex, offset) {
   const mergedTemp = mergedImages[pageIndex]
   mergedImages[pageIndex] = mergedImages[targetIndex]
   mergedImages[targetIndex] = mergedTemp
-  showImages(pdfIndex)
+  for (const values of [originalImagesCache[pdfIndex], pageRotations[pdfIndex]]) {
+    const value = values[pageIndex]
+    values[pageIndex] = values[targetIndex]
+    values[targetIndex] = value
+  }
+  await editPages(pdfIndex, () => refreshMergedImages(pdfIndex))
+}
+
+/* 編集中の操作を止め、完了後にプレビューを更新 */
+async function editPages(pdfIndex, edit) {
+  if (editingPages) return
+  editingPages = true
+  input.disabled = true
+  downloadBtn.disabled = true
+  preview.querySelectorAll('button, select').forEach(control => {
+    control.disabled = true
+  })
+  try {
+    await edit()
+  } catch (error) {
+    console.error(error)
+    window.alert('ページの編集に失敗しました。もう一度お試しください。')
+  } finally {
+    editingPages = false
+    input.disabled = false
+    downloadBtn.disabled = false
+    showImages(pdfIndex)
+  }
+}
+
+/* 元画像から指定角度の画像を生成し、マージ画像も更新 */
+async function rotatePage(pdfIndex, pageIndex, angle) {
+  if (![0, 90, 180, 270].includes(angle)) return
+  const originalUrl = originalImagesCache[pdfIndex][pageIndex]
+  let rotatedUrl = originalUrl
+  if (angle !== 0) {
+    const img = await loadImage(originalUrl)
+    const canvas = document.createElement('canvas')
+    const swapDimensions = angle === 90 || angle === 270
+    canvas.width = swapDimensions ? img.height : img.width
+    canvas.height = swapDimensions ? img.width : img.height
+    const context = canvas.getContext('2d')
+    context.translate(canvas.width / 2, canvas.height / 2)
+    context.rotate(angle * Math.PI / 180)
+    context.drawImage(img, -img.width / 2, -img.height / 2)
+    rotatedUrl = canvas.toDataURL('image/png')
+  }
+  imagesCache[pdfIndex][pageIndex] = rotatedUrl
+  pageRotations[pdfIndex][pageIndex] = angle
+  await refreshMergedImages(pdfIndex)
+}
+
+/* 回転や並び替え後の画像でマージキャッシュを再生成 */
+async function refreshMergedImages(pdfIndex) {
+  const images = imagesCache[pdfIndex]
+  const modes = mergeModes[pdfIndex]
+  const mergedImages = mergedImagesCache[pdfIndex]
+  mergedImages.fill(null)
+  for (let i = 0; i < images.length; i += 1) {
+    const mode = modes[i]
+    if (mode === 'none' || i + getRequiredPages(mode) > images.length) continue
+    const count = getRequiredPages(mode)
+    mergedImages[i] = await mergeImages(
+      images[i], images[i + 1], mode,
+      count >= 3 ? images[i + 2] : undefined,
+      count === 4 ? images[i + 3] : undefined
+    )
+  }
 }
 
 /* PDFページの並び替え結果を生成 */
@@ -203,7 +298,7 @@ async function createReorderedPdf(pdfFile, order) {
 }
 
 /* PDFページをマージして生成 */
-async function createMergedPdf(pdfFile, order, modes, images, mergedImages) {
+async function createMergedPdf(pdfFile, order, modes, images, mergedImages, rotations = []) {
   const arrayBuffer = await pdfFile.arrayBuffer()
   const sourcePdf = await PDFLib.PDFDocument.load(arrayBuffer)
   const outputPdf = await PDFLib.PDFDocument.create()
@@ -211,13 +306,13 @@ async function createMergedPdf(pdfFile, order, modes, images, mergedImages) {
     const pageIndex = order[i]
     const mode = modes[i] || 'none'
     if (mode === 'none') {
-      await appendOriginalPage(outputPdf, sourcePdf, pageIndex)
+      await appendOriginalPage(outputPdf, sourcePdf, pageIndex, rotations[i])
       continue
     }
     if (mode === 'grid') {
       const nextIndex = i + 3
       if (nextIndex >= order.length) {
-        await appendOriginalPage(outputPdf, sourcePdf, pageIndex)
+        await appendOriginalPage(outputPdf, sourcePdf, pageIndex, rotations[i])
         continue
       }
       const mergedUrl = mergedImages && mergedImages[i]
@@ -230,7 +325,7 @@ async function createMergedPdf(pdfFile, order, modes, images, mergedImages) {
     if (mode === 'tripleVertical' || mode === 'tripleHorizontal') {
       const nextIndex = i + 2
       if (nextIndex >= order.length) {
-        await appendOriginalPage(outputPdf, sourcePdf, pageIndex)
+        await appendOriginalPage(outputPdf, sourcePdf, pageIndex, rotations[i])
         continue
       }
       const mergedUrl = mergedImages && mergedImages[i]
@@ -241,7 +336,7 @@ async function createMergedPdf(pdfFile, order, modes, images, mergedImages) {
       continue
     }
     if (i + 1 >= order.length) {
-      await appendOriginalPage(outputPdf, sourcePdf, pageIndex)
+      await appendOriginalPage(outputPdf, sourcePdf, pageIndex, rotations[i])
       continue
     }
     const mergedUrl = mergedImages && mergedImages[i]
@@ -254,8 +349,9 @@ async function createMergedPdf(pdfFile, order, modes, images, mergedImages) {
 }
 
 /* 元ページを回転情報ごとコピー */
-async function appendOriginalPage(outputPdf, sourcePdf, pageIndex) {
+async function appendOriginalPage(outputPdf, sourcePdf, pageIndex, rotation = 0) {
   const [copiedPage] = await outputPdf.copyPages(sourcePdf, [pageIndex])
+  copiedPage.setRotation(PDFLib.degrees((copiedPage.getRotation().angle + rotation) % 360))
   outputPdf.addPage(copiedPage)
 }
 
@@ -290,7 +386,8 @@ async function downloadZip() {
       pageOrders[i],
       mergeModes[i],
       imagesCache[i],
-      mergedImagesCache[i]
+      mergedImagesCache[i],
+      pageRotations[i]
     )
     folder.file(pdfFile.name, reorderedPdfBytes)
     const imgFolder = folder.folder('images')
