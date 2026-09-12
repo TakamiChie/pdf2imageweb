@@ -1,5 +1,9 @@
 'use strict'
 
+/* PDF.js本体と同じバージョンの文字描画用データを使用 */
+const pdfJsBaseUrl = 'https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/'
+pdfjsLib.GlobalWorkerOptions.workerSrc = `${pdfJsBaseUrl}build/pdf.worker.min.js`
+
 /* PDFファイルのリストを保持 */
 const files = []
 /* 変換後の画像データURLを保持 */
@@ -25,6 +29,7 @@ const downloadBtn = document.getElementById('download')
 /* ファイルをリストに追加する */
 async function addFiles(fileList) {
   if (editingPages) return
+  const firstNewIndex = files.length
   for (const f of fileList) {
     if (f.type === 'application/pdf') {
       files.push(f)
@@ -37,23 +42,17 @@ async function addFiles(fileList) {
 
   preview.innerHTML = ''
   if (files.length === 0) return
-  imagesCache.length = 0
-  originalImagesCache.length = 0
-  pageRotations.length = 0
-  pageOrders.length = 0
-  mergeModes.length = 0
-  mergedImagesCache.length = 0
-  for (const file of files) {
-    const images = await convertPdf(file)
-    imagesCache.push(images)
-    originalImagesCache.push([...images])
-    pageRotations.push(images.map(() => 0))
-    pageOrders.push(Array.from({ length: images.length }, (_, index) => index))
-    mergeModes.push(Array.from({ length: images.length }, () => 'none'))
-    mergedImagesCache.push(Array.from({ length: images.length }, () => null))
-  }
-  showImages(0)
-  downloadBtn.disabled = false
+  await editPages(0, async () => {
+    for (let i = firstNewIndex; i < files.length; i += 1) {
+      const images = await convertPdf(files[i])
+      imagesCache[i] = images
+      originalImagesCache[i] = [...images]
+      pageRotations[i] = images.map(() => 0)
+      pageOrders[i] = Array.from({ length: images.length }, (_, index) => index)
+      mergeModes[i] = Array.from({ length: images.length }, () => 'none')
+      mergedImagesCache[i] = Array.from({ length: images.length }, () => null)
+    }
+  })
 }
 
 /* ドロップ操作 */
@@ -74,7 +73,13 @@ input.addEventListener('change', e => {
 /* PDFを画像化して表示 */
 async function convertPdf(file) {
   const arrayBuffer = await file.arrayBuffer()
-  const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise
+  const pdf = await pdfjsLib.getDocument({
+    data: arrayBuffer,
+    cMapUrl: `${pdfJsBaseUrl}cmaps/`,
+    cMapPacked: true,
+    standardFontDataUrl: `${pdfJsBaseUrl}standard_fonts/`,
+    useSystemFonts: true
+  }).promise
   const images = []
   for (let i = 1; i <= pdf.numPages; i++) {
     const page = await pdf.getPage(i)
@@ -104,6 +109,11 @@ async function showImages(index) {
   const images = imagesCache[index] || []
   const modes = mergeModes[index] || []
   const mergedImages = mergedImagesCache[index] || []
+  if (images.length === 0) {
+    const message = document.createElement('p')
+    message.textContent = 'ページがありません。このPDFはダウンロード対象外です。'
+    preview.appendChild(message)
+  }
   const listItems = Array.from(list.children)
   listItems.forEach((item, itemIndex) => {
     item.classList.toggle('active', itemIndex === index)
@@ -188,10 +198,38 @@ async function showImages(index) {
     })
     actions.appendChild(upButton)
     actions.appendChild(downButton)
+    const deleteButton = document.createElement('button')
+    deleteButton.type = 'button'
+    deleteButton.textContent = '削除'
+    deleteButton.setAttribute('aria-label', `ページ ${pageIndex + 1}を削除`)
+    deleteButton.addEventListener('click', () => {
+      deletePage(index, pageIndex)
+    })
+    actions.appendChild(deleteButton)
     container.appendChild(actions)
     preview.appendChild(container)
   })
   downloadBtn.onclick = () => downloadZip()
+}
+
+/* ページを削除し、そのページを含むマージを解除 */
+async function deletePage(pdfIndex, pageIndex) {
+  if (editingPages) return
+  const images = imagesCache[pdfIndex]
+  if (!images || !Number.isInteger(pageIndex) || pageIndex < 0 || pageIndex >= images.length) return
+  await editPages(pdfIndex, () => {
+    const modes = mergeModes[pdfIndex]
+    const mergedImages = mergedImagesCache[pdfIndex]
+    for (let i = 0; i <= pageIndex; i += 1) {
+      if (modes[i] !== 'none' && i + getRequiredPages(modes[i]) > pageIndex) {
+        modes[i] = 'none'
+        mergedImages[i] = null
+      }
+    }
+    for (const cache of [imagesCache, originalImagesCache, pageRotations, pageOrders, mergeModes, mergedImagesCache]) {
+      cache[pdfIndex].splice(pageIndex, 1)
+    }
+  })
 }
 
 /* ページの並びを入れ替える */
@@ -242,7 +280,7 @@ async function editPages(pdfIndex, edit) {
   } finally {
     editingPages = false
     input.disabled = false
-    downloadBtn.disabled = false
+    downloadBtn.disabled = !imagesCache.some(images => images.length > 0)
     showImages(pdfIndex)
   }
 }
@@ -377,8 +415,10 @@ function dataUrlToUint8Array(dataUrl) {
 
 /* 画像とPDFをZIPでダウンロード */
 async function downloadZip() {
+  if (editingPages || !imagesCache.some(images => images.length > 0)) return
   const zip = new JSZip()
   for (let i = 0; i < files.length; i++) {
+    if (!pageOrders[i] || pageOrders[i].length === 0) continue
     const pdfFile = files[i]
     const folder = zip.folder(pdfFile.name.replace(/\.pdf$/i, ''))
     const reorderedPdfBytes = await createMergedPdf(

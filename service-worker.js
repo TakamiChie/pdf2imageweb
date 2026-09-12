@@ -1,10 +1,12 @@
-const CACHE_NAME = 'pdf2imageweb-cache-v3'
+const CACHE_NAME = 'pdf2imageweb-cache-v5'
+const PDFJS_BASE_URL = 'https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/'
 const FILES = [
   '/',
   '/index.html',
   '/app.js',
   '/manifest.json',
   'https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.min.js',
+  `${PDFJS_BASE_URL}build/pdf.worker.min.js`,
   'https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js',
   '/css/style.css',
   '/icon/image.png',
@@ -33,7 +35,22 @@ self.addEventListener('activate', event => {
 self.addEventListener('fetch', event => {
   event.respondWith(
     caches.match(event.request).then(response => {
-      return response || fetch(event.request);
+      if (response) return response;
+      const url = event.request.url;
+      const isFontResource = event.request.method === 'GET' && (
+        url.startsWith(`${PDFJS_BASE_URL}cmaps/`) ||
+        url.startsWith(`${PDFJS_BASE_URL}standard_fonts/`)
+      );
+      return fetch(event.request).then(response => {
+        // 使用した文字描画用データを保存し、次回のオフライン描画でも利用する
+        if (isFontResource && response.ok) {
+          const cachedResponse = response.clone();
+          event.waitUntil(
+            caches.open(CACHE_NAME).then(cache => cache.put(event.request, cachedResponse)).catch(console.error)
+          );
+        }
+        return response;
+      });
     })
   );
 });
